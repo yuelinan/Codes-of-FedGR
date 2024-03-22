@@ -204,7 +204,8 @@ class separator_gum(torch.nn.Module):
 
         h_node = self.nn(h_node) if self.nn is not None else h_node
         assert gate.dim() == h_node.dim() and gate.size(0) == h_node.size(0)
-        gate = F.gumbel_softmax(gate,hard=False,dim=-1)
+        # gate = F.gumbel_softmax(gate,hard=False,dim=-1)
+        gate = F.gumbel_softmax(gate,hard=True,dim=-1)
 
         gate = gate[:,-1].unsqueeze(-1)
 
