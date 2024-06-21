@@ -1,4 +1,4 @@
-Official implementation of "Federated Graph Rationalization with Anti-shortcut Augmentations".
+Official implementation of ICML 2024 paper "Federated Self-Explaining GNNs with Anti-shortcut Augmentations".
 
 ## Data download
 - Spurious-Motif: this dataset can be generated via `spmotif_gen/spmotif.ipynb` in [DIR](https://github.com/Wuyxin/DIR-GNN/tree/main). 
