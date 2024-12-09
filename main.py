@@ -43,81 +43,72 @@ def main(args,seed):
         split_idx = dataset.get_idx_split()
         
         train = dataset[split_idx["train"]]
-        print(len(train))
 
+
+        labels = dataset[split_idx["train"]].y
+        
         ## split the client
         random.seed(42)
         np.random.seed(42)
 
-        def partition_class_samples_with_dirichlet_distribution(N, alpha, client_num, idx_batch, idx_k):
-            np.random.shuffle(idx_k)
-            # using dirichlet distribution to determine the unbalanced proportion for each client (client_num in total)
-            # e.g., when client_num = 4, proportions = [0.29543505 0.38414498 0.31998781 0.00043216], sum(proportions) = 1
-            proportions = np.random.dirichlet(np.repeat(alpha, client_num))
-            print(proportions)
-            weight = proportions
-            # get the index in idx_k according to the dirichlet distribution
-            proportions = np.array([p * (len(idx_j) < N / client_num) for p, idx_j in zip(proportions, idx_batch)])
-            proportions = proportions / proportions.sum()
-            proportions = (np.cumsum(proportions) * len(idx_k)).astype(int)[:-1]
-
-            # generate the batch list for each client
-            idx_batch = [idx_j + idx.tolist() for idx_j, idx in zip(idx_batch, np.split(idx_k, proportions))]
-            min_size = min([len(idx_j) for idx_j in idx_batch])
-
-            return idx_batch, min_size,weight
-
-        def create_non_uniform_split(alpha, idxs, client_number, is_train=True):
+        def partition_labels_with_dirichlet_distribution(N, alpha, client_num, idx_batch, labels_batch):
+            np.random.shuffle(labels_batch)  # 打乱标签顺序
             
+            # 使用 Dirichlet 分布生成每个客户端的标签分配比例
+            proportions = np.random.dirichlet(np.repeat(alpha, client_num))
+            
+            print("Generated proportions (per client):")
+            print(proportions)
+            weight = proportions  # 记录标签分配的比例
+
+            # 计算每个客户端分配到的数据量
+            proportions = proportions / proportions.sum()
+            proportions = (np.cumsum(proportions) * len(labels_batch)).astype(int)[:-1]
+            
+            # 按比例划分样本数据
+            idx_batch = [idx_j + idx.tolist() for idx_j, idx in zip(idx_batch, np.split(labels_batch, proportions))]
+            
+            min_size = min([len(idx_j) for idx_j in idx_batch])  # 获取最小数据量
+
+            return idx_batch, min_size, weight
+            
+
+        def create_non_uniform_split(alpha, idxs, labels, client_number):
             N = len(idxs)
-            logging.info("sample number = %d, client_number = %d" % (N, client_number))
-            #logging.info(idxs)
-            idx_batch_per_client = [[] for _ in range(client_number)]
-            (
-                idx_batch_per_client,
-                min_size,
-                weight,
-            ) = partition_class_samples_with_dirichlet_distribution(
+            print(f"Total number of samples: {N}, Total clients: {client_number}")
+            idx_batch_per_client = [[] for _ in range(client_number)]  # 每个客户端的数据索引 
+            idxs_per_label = [np.where(labels == i)[0] for i in range(labels.size()[1])]  # 按标签划分索引
+
+            # 使用Dirichlet分布按标签划分数据
+            idx_batch_per_client, min_size, weight = partition_labels_with_dirichlet_distribution(
                 N, alpha, client_number, idx_batch_per_client, idxs
             )
-            #logging.info(idx_batch_per_client)
-            sample_num_distribution = []
+            
+            return idx_batch_per_client, weight
 
-            for client_id in range(client_number):
-                sample_num_distribution.append(len(idx_batch_per_client[client_id]))
-                logging.info(
-                    "client_id = %d, sample_number = %d"
-                    % (client_id, len(idx_batch_per_client[client_id]))
-                )
-            return idx_batch_per_client,weight
-
-        def get_fed_dataset(train,client_number,alpha ):
-            num_train_samples = len(train)
+        def get_fed_dataset(train_data, labels, client_number, alpha):
+            num_train_samples = len(train_data)
             train_idxs = list(range(num_train_samples))
-            random.shuffle(train_idxs)
 
-            clients_idxs_train,weight = create_non_uniform_split(
-            alpha,  train_idxs, client_number, True
+            # 生成非均匀划分的数据
+            clients_data, weight = create_non_uniform_split(
+                alpha, train_idxs, labels, client_number
             )
-            # print(clients_idxs_train)
+
             partition_dicts = [None] * client_number
 
             for client in range(client_number):
-                client_train_idxs = clients_idxs_train[client]
-
-                train_client = [
-                    train[idx] for idx in client_train_idxs
-                ]
-
-                partition_dict = {
-                "train": train_client,
-                }
-
+                client_train_idxs = clients_data[client]
+                train_client_data = [train_data[idx] for idx in client_train_idxs]
+                print(len(train_client_data))
+                train_loader = DataLoader(train_client_data, batch_size=args.batch_size, shuffle=True, num_workers = 0)
+                partition_dict = {"train": train_loader}
                 partition_dicts[client] = partition_dict
 
-            return partition_dicts,weight
+            return partition_dicts, weight
+        
+        partition_dicts,client_weights = get_fed_dataset(train, labels, client_number=args.client_number, alpha=args.alpha)
 
-        partition_dicts_clients,client_weights = get_fed_dataset(train, client_number=args.client_number, alpha=args.alpha)
         #  将各个客户端的数据封装为dataloader
         partition_dicts = [None] * args.client_number
         for client in range(args.client_number):
