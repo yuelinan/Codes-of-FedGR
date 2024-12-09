@@ -10,7 +10,7 @@ import copy
 from torch_geometric.nn import ARMAConv
 from torch_geometric.nn import global_add_pool, global_mean_pool, global_max_pool, GlobalAttention, Set2Set
 nn_act = torch.nn.ReLU()
-F_act = F.relu
+
 
 
 class FedGR(torch.nn.Module):
