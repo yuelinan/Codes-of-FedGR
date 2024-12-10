@@ -44,6 +44,7 @@ def main(args,seed):
     datadir = './data/'
     bias = args.bias
     train_dataset = SPMotif(osp.join(datadir, f'SPMotif-{bias}/'), mode='train')
+    labels = SPMotif(osp.join(datadir, f'SPMotif-{bias}/'), mode='train').y
     val_dataset = SPMotif(osp.join(datadir, f'SPMotif-{bias}/'), mode='val')
     test_dataset = SPMotif(osp.join(datadir, f'SPMotif-{bias}/'), mode='test')
     
@@ -54,56 +55,45 @@ def main(args,seed):
     random.seed(42)
     np.random.seed(42)
 
-    def partition_class_samples_with_dirichlet_distribution(N, alpha, client_num, idx_batch, idx_k):
-        np.random.shuffle(idx_k)
-        # using dirichlet distribution to determine the unbalanced proportion for each client (client_num in total)
-        # e.g., when client_num = 4, proportions = [0.29543505 0.38414498 0.31998781 0.00043216], sum(proportions) = 1
+    def partition_labels_with_dirichlet_distribution(N, alpha, client_num, idx_batch, labels_batch):
+        np.random.shuffle(labels_batch)  
+
         proportions = np.random.dirichlet(np.repeat(alpha, client_num))
+        
+        print("Generated proportions (per client):")
         print(proportions)
         weight = proportions
-        # get the index in idx_k according to the dirichlet distribution
-        proportions = np.array([p * (len(idx_j) < N / client_num) for p, idx_j in zip(proportions, idx_batch)])
+
         proportions = proportions / proportions.sum()
-        proportions = (np.cumsum(proportions) * len(idx_k)).astype(int)[:-1]
-
-        # generate the batch list for each client
-        idx_batch = [idx_j + idx.tolist() for idx_j, idx in zip(idx_batch, np.split(idx_k, proportions))]
-        min_size = min([len(idx_j) for idx_j in idx_batch])
-
-        return idx_batch, min_size,weight
-
-    def create_non_uniform_split(alpha, idxs, client_number, is_train=True):
+        proportions = (np.cumsum(proportions) * len(labels_batch)).astype(int)[:-1]
         
+        idx_batch = [idx_j + idx.tolist() for idx_j, idx in zip(idx_batch, np.split(labels_batch, proportions))]
+        
+        min_size = min([len(idx_j) for idx_j in idx_batch]) 
+
+        return idx_batch, min_size, weight
+
+    def create_non_uniform_split(alpha, idxs, labels, client_number):
         N = len(idxs)
-        logging.info("sample number = %d, client_number = %d" % (N, client_number))
-        logging.info(idxs)
-        idx_batch_per_client = [[] for _ in range(client_number)]
-        (
-            idx_batch_per_client,
-            min_size,
-            weight,
-        ) = partition_class_samples_with_dirichlet_distribution(
+        print(f"Total number of samples: {N}, Total clients: {client_number}")
+        idx_batch_per_client = [[] for _ in range(client_number)] 
+        idxs_per_label = [np.where(labels == i)[0] for i in range(3)]  
+
+        idx_batch_per_client, min_size, weight = partition_labels_with_dirichlet_distribution(
             N, alpha, client_number, idx_batch_per_client, idxs
         )
-        logging.info(idx_batch_per_client)
-        sample_num_distribution = []
+        
+        return idx_batch_per_client, weight
 
-        for client_id in range(client_number):
-            sample_num_distribution.append(len(idx_batch_per_client[client_id]))
-            logging.info(
-                "client_id = %d, sample_number = %d"
-                % (client_id, len(idx_batch_per_client[client_id]))
-            )
-        return idx_batch_per_client,weight
-
-    def get_fed_dataset(train,client_number,alpha ):
-        num_train_samples = len(train)
+    
+    def get_fed_dataset(train_data, labels, client_number, alpha ):
+        num_train_samples = len(train_data)
         train_idxs = list(range(num_train_samples))
         random.shuffle(train_idxs)
 
         clients_idxs_train,weight = create_non_uniform_split(
-        alpha,  train_idxs, client_number, True
-        )
+                alpha, train_idxs, labels, client_number
+            )
         # print(clients_idxs_train)
         partition_dicts = [None] * client_number
 
@@ -111,7 +101,7 @@ def main(args,seed):
             client_train_idxs = clients_idxs_train[client]
 
             train_client = [
-                train[idx] for idx in client_train_idxs
+                train_data[idx] for idx in client_train_idxs
             ]
 
             partition_dict = {
@@ -122,8 +112,8 @@ def main(args,seed):
 
         return partition_dicts,weight
 
-    partition_dicts_clients,client_weights = get_fed_dataset(train_dataset, client_number=3, alpha=args.alpha)
 
+    partition_dicts_clients,client_weights = get_fed_dataset(train_dataset, labels, client_number=3, alpha=args.alpha)
     partition_dicts = [None] * args.client_number
     for client in range(args.client_number):
         train_loader = DataLoader(partition_dicts_clients[client]['train'], batch_size=args.batch_size, shuffle=True, num_workers = 0)
